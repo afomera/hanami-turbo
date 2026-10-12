@@ -3,3 +3,4 @@
 /coverage/
 /pkg/
 /spec/examples.txt
+/*.gem

@@ -12,7 +12,7 @@
 - Optional lighter layouts for Turbo Frame requests.
 
 Built against the main branches of Hanami and its gems. See
-[hanami-turbo-example](../hanami-turbo-example) for a complete app using every feature.
+[hanami-turbo-example](https://github.com/afomera/hanami-turbo-example) for a complete app using every feature.
 
 ## Setup
 
