@@ -127,6 +127,10 @@ module Hanami
 
       private
 
+      # The scope of the template being rendered. Custom action methods can use it for helpers,
+      # `routes` and locals (the equivalent of `@view_context` in turbo-rails).
+      #
+      # @api public
       attr_reader :scope
 
       def stream(name, target_attributes, content = nil, partial: nil, locals: {}, method: nil, **attributes, &block)

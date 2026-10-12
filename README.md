@@ -6,7 +6,8 @@
   HTML when a view has no stream template.
 - A `turbo_stream` builder, `turbo_frame_tag`, and `dom_id`/`dom_class` helpers for templates.
 - `button_to`, for buttons that submit (with Turbo confirmations, like Rails).
-- Custom stream actions, added like in turbo-rails (`turbo_stream_action_tag` included).
+- [Custom stream actions](#custom-stream-actions), added like in turbo-rails
+  (`turbo_stream_action_tag` included).
 - `303 See Other` redirects after non-GET requests, as Turbo requires.
 - Optional lighter layouts for Turbo Frame requests.
 
@@ -101,23 +102,47 @@ end
 Error responses that weren't rendered from a stream template (such as `halt 404`) are sent as HTML
 even when the request negotiated a stream, so Turbo shows them instead of silently ignoring them.
 
-### Custom stream actions
+Custom actions (your own, beyond Turbo's built-ins) are covered in
+[Custom stream actions](#custom-stream-actions) below.
 
-Add your own actions the way turbo-rails apps do: write a module and include it into
-`Hanami::Turbo::StreamBuilder`. Its methods can call `action` (or `action_all`, for CSS selector
-targets). Keyword arguments become attributes of the `<turbo-stream>` element, the target may be
-`nil`, and a `<template>` is only added when there is content:
+To pick a format yourself, pass it to `render`; explicit options always win:
 
 ```ruby
-# config/turbo_stream_actions.rb, required from config/app.rb
+res.render(view, format: :html)
+```
+
+## Custom stream actions
+
+Turbo's built-in actions cover changing the DOM, but you can add your own, such as showing a toast,
+highlighting an element, or logging to the console. A custom action has two halves:
+
+1. **Ruby**: a method on the `turbo_stream` builder that renders `<turbo-stream action="...">`.
+2. **JavaScript**: a function on `Turbo.StreamActions` that runs when that element arrives.
+
+This works the way it does in turbo-rails, and modules written for turbo-rails can be reused as they
+are (see [Porting from turbo-rails](#porting-from-turbo-rails)).
+
+### 1. Define the actions
+
+Write a module of methods, and include it into `Hanami::Turbo::StreamBuilder`:
+
+```ruby
+# config/turbo_stream_actions.rb
 module Bookshelf
   module TurboStreamActions
+    # No target: the JavaScript decides where the toast goes.
     def toast(message, level: "info")
       action(:toast, nil, message:, level:)
     end
 
+    # A target: a DOM id string, or a record (turned into an id with dom_id).
     def highlight(target)
       action(:highlight, target)
+    end
+
+    # A target and content, rendered from a partial.
+    def flash_message(target, message)
+      action(:flash_message, target, partial: "shared/flash", locals: {message:})
     end
   end
 end
@@ -125,39 +150,145 @@ end
 Hanami::Turbo::StreamBuilder.include(Bookshelf::TurboStreamActions)
 ```
 
+Require it from your app class, so it's loaded before anything renders, whether in the server, the
+console, or tests:
+
+```ruby
+# config/app.rb
+require "hanami"
+require "hanami/turbo"
+require_relative "turbo_stream_actions"
+```
+
+Keep this file out of `app/` and `lib/<your_app>/`: those are autoloaded, and the module is included
+once, at boot. Like a Rails initializer, changes need a server restart (code reloading won't pick
+them up).
+
+### 2. Use them in stream templates
+
 ```erb
-<%= turbo_stream.toast "Saved #{book.title}", level: "success" %>
+<%# app/templates/books/create.turbo_stream.erb %>
+<%= turbo_stream.prepend "books", partial: "books/book", locals: {book:} %>
+<%= turbo_stream.toast "Added #{book.title}", level: "success" %>
 <%= turbo_stream.highlight book %>
 ```
 
-Then handle them in JavaScript:
+This renders:
+
+```html
+<turbo-stream action="prepend" target="books"><template>...</template></turbo-stream>
+<turbo-stream action="toast" message="Added Dune" level="success"></turbo-stream>
+<turbo-stream action="highlight" target="book_42"></turbo-stream>
+```
+
+For a one-off action, you don't need a module. Use `action` directly, or the
+`turbo_stream_action_tag` view helper:
+
+```erb
+<%= turbo_stream.action :scroll_to, book, behavior: "smooth" %>
+<%= turbo_stream_action_tag :console_log, message: "Hello" %>
+```
+
+### 3. Handle them in JavaScript
+
+Register a handler for each action on `StreamActions`. Inside it, `this` is the `<turbo-stream>`
+element:
 
 ```js
+// app/assets/js/stream_actions.js, imported from app.js
 import { StreamActions } from "@hotwired/turbo";
 
 StreamActions.toast = function () {
-  // `this` is the <turbo-stream> element
-  showToast(this.getAttribute("message"), this.getAttribute("level"));
+  const toast = document.createElement("div");
+  toast.className = `toast toast-${this.getAttribute("level")}`;
+  toast.setAttribute("role", "status");
+  toast.textContent = this.getAttribute("message");
+  document.getElementById("toasts").append(toast);
+  setTimeout(() => toast.remove(), 4000);
 };
 
 StreamActions.highlight = function () {
   this.targetElements.forEach((element) => element.classList.add("highlight"));
 };
+
+StreamActions.flash_message = function () {
+  this.targetElements.forEach((element) => element.replaceChildren(this.templateContent));
+};
 ```
 
-Modules written for turbo-rails work unchanged, since `turbo_stream_action_tag` is also available,
-with the same signature (`turbo_stream_action_tag :name, target:, targets:, template:, **attributes`).
-It's a view helper too, for one-off actions. Content can also come from `partial:` and `locals:`, or
-a block, as with the built-in actions.
+Useful properties of the stream element:
 
-Require the module from `config/app.rb` rather than putting it somewhere autoloaded: like a Rails
-initializer, it is included once at boot, so restart the server after changing it.
+| | |
+| --- | --- |
+| `this.getAttribute("name")` | an attribute you passed from Ruby |
+| `this.targetElements` | the elements matching `target` (by id) or `targets` (by CSS selector) |
+| `this.templateContent` | a copy of the `<template>` content, if any |
 
-To pick a format yourself, pass it to `render`; explicit options always win:
+Import the handlers in your entry point (`import "./stream_actions.js"`), so they're registered
+before any stream arrives. If no handler is registered for an action, Turbo raises an error in the
+browser console.
+
+### The building blocks
+
+Your methods (and templates) can use these builder methods:
+
+| Method | Renders |
+| --- | --- |
+| `action(name, target, content = nil, **options, &block)` | an action for one target. `target` may be `nil`. |
+| `action_all(name, targets, content = nil, **options, &block)` | an action for every element matching the `targets` CSS selector. |
+| `turbo_stream_action_tag(name, target: nil, targets: nil, template: nil, **attributes)` | the turbo-rails equivalent, with keyword arguments. |
+
+Inside your methods, `scope` is the scope of the template being rendered, so you can use its
+helpers, `routes` and locals, just as turbo-rails methods use `@view_context`:
 
 ```ruby
-res.render(view, format: :html)
+def toast_with_link(message, book)
+  action(:toast, nil, message:, href: scope.routes.path(:book, id: book.id))
+end
 ```
+
+How the arguments become HTML:
+
+- **Content** goes in a `<template>`, from (in order of precedence) a block, `partial:` with
+  `locals:`, or the `content` argument. Strings are HTML-escaped unless marked safe
+  (`.html_safe`). Partials are rendered as stream partials if they exist (`_flash.turbo_stream.erb`),
+  and otherwise as HTML (`_flash.html.erb`).
+- **A `<template>` is added only when there's content.** Turbo's built-in content actions (`append`,
+  `update`, etc.) always get one, since Turbo expects it.
+- **Other keyword arguments become attributes**, with their names used as given. `request_id: 1`
+  renders `request_id="1"`, so for a dashed name use a string key (`"request-id": 1`). A `data:` hash
+  becomes `data-*` attributes, with keys dasherized and non-string values encoded as JSON.
+  Attributes with `nil` values are left out, and `true` renders as `"true"`.
+- **`partial:`, `locals:` and `method:` are reserved**: the first two supply content, and `method:`
+  is the attribute Turbo uses for morphing (`method: :morph`).
+
+### Testing
+
+Custom actions render plain HTML, so request specs can check for them like any other stream:
+
+```ruby
+it "shows a toast after creating a book" do
+  post "/books", {book: {title: "Dune", author: "Frank Herbert"}},
+    {"HTTP_ACCEPT" => "text/vnd.turbo-stream.html, text/html"}
+
+  expect(last_response.body).to include(
+    %(<turbo-stream action="toast" message="Added Dune" level="success"></turbo-stream>)
+  )
+end
+```
+
+The JavaScript half needs a browser test (for example with Capybara or Playwright).
+
+### Porting from turbo-rails
+
+| turbo-rails | hanami-turbo |
+| --- | --- |
+| `Turbo::Streams::TagBuilder.prepend(MyActions)` | `Hanami::Turbo::StreamBuilder.include(MyActions)` |
+| Module in `config/initializers/` | Module in `config/`, required from `config/app.rb` |
+| `turbo_stream_action_tag :name, target:, targets:, template:, **attributes` | the same |
+| `action(:name, target, content)` in TagBuilder methods | the same, plus `partial:`/`locals:` and blocks |
+| `@view_context` in TagBuilder methods | `scope`: the template's scope, with its helpers and `routes` |
+| `Turbo.StreamActions.name = function () { ... }` | the same (it's Turbo's JavaScript API) |
 
 ## Turbo Frames
 
