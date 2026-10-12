@@ -13,6 +13,11 @@ module CustomStreamActionsSpec
       turbo_stream_action_tag :console_log, message: message
     end
 
+    # Uses the template's scope, like @view_context in turbo-rails.
+    def toast_with_link(message)
+      action(:toast, nil, message:, href: scope.routes.path(:books), count: scope.format_number(1234))
+    end
+
     # Targeted, with content from a partial.
     def highlight(target, **options)
       action(:highlight, target, **options)
@@ -55,6 +60,20 @@ RSpec.describe "Custom Turbo Stream actions", :app_integration do
     output = render_stream(%(<%= turbo_stream.highlight book, partial: "books/flash", locals: {title: book.title}, duration: 500 %>))
 
     expect(output).to eq %(<turbo-stream action="highlight" target="book_42" duration="500"><template><p>Dune</p></template></turbo-stream>)
+  end
+
+  it "gives custom actions the template's scope, for helpers and routes" do
+    write "config/routes.rb", <<~RUBY
+      module TestApp
+        class Routes < Hanami::Routes
+          get "/books", to: "books.create", as: :books
+        end
+      end
+    RUBY
+
+    output = render_stream(%(<%= turbo_stream.toast_with_link "Saved" %>))
+
+    expect(output).to eq %(<turbo-stream action="toast" message="Saved" href="/books" count="1,234"></turbo-stream>)
   end
 
   it "provides turbo_stream_action_tag as a view helper, with target, targets and template" do
