@@ -8,7 +8,8 @@
 - `303 See Other` redirects after non-GET requests, as Turbo requires.
 - Optional lighter layouts for Turbo Frame requests.
 
-Built against the main branches of Hanami and its gems.
+Built against the main branches of Hanami and its gems. See
+[hanami-turbo-example](../hanami-turbo-example) for a complete app using every feature.
 
 ## Setup
 
@@ -46,9 +47,15 @@ import "@hotwired/turbo";
 
 ```erb
 <%# app/templates/layouts/app.html.erb, inside <head> %>
-<%= csrf_meta_tags %>
+<%= csrf_meta_tags&.html_safe %>
 <%= javascript_tag "app", defer: true %>
 ```
+
+Load the script in `<head>` (with `defer`), not at the end of `<body>`: Turbo replaces the body on
+each visit, and would otherwise evaluate it again.
+
+On Hanami main, `csrf_meta_tags` returns a string that isn't marked HTML safe, so it is escaped
+unless you call `html_safe` as above. (Sessions must be enabled for CSRF tokens to exist.)
 
 ## Turbo Streams
 
@@ -74,6 +81,23 @@ The builder supports every Turbo action: `append`, `prepend`, `replace`, `update
 `after`, `remove` and `refresh`, plus `*_all` variants that take a CSS selector (`update_all
 ".count", "3"`), `method: :morph`, and `action(:custom_action, target, ...)` for custom actions.
 Targets can be strings or records.
+
+A common shape for actions that respond to Turbo with streams, and redirect everyone else:
+
+```ruby
+def handle(request, response)
+  book = book_repo.create(request.params[:book])
+
+  if request.turbo_stream?
+    response.render(view, book:)   # renders create.turbo_stream.erb
+  else
+    response.redirect_to routes.path(:books)
+  end
+end
+```
+
+Error responses that weren't rendered from a stream template (such as `halt 404`) are sent as HTML
+even when the request negotiated a stream, so Turbo shows them instead of silently ignoring them.
 
 To pick a format yourself, pass it to `render`; explicit options always win:
 
