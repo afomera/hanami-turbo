@@ -18,6 +18,15 @@ module Hanami
         StreamBuilder.new(self)
       end
 
+      # Returns a `<turbo-stream>` element, like turbo-rails' helper of the same name.
+      #
+      # @see StreamBuilder#turbo_stream_action_tag
+      #
+      # @api public
+      def turbo_stream_action_tag(...)
+        turbo_stream.turbo_stream_action_tag(...)
+      end
+
       # Returns a `<turbo-frame>` element.
       #
       # The id may be a string, or a record (with an optional prefix), passed to {#dom_id}.

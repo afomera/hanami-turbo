@@ -11,6 +11,20 @@ module Hanami
     # `_book.turbo_stream.erb`), and otherwise as HTML, so the same `_book.html.erb` partial can be
     # used for full page renders and for streams.
     #
+    # Add your own stream actions by including a module, as turbo-rails apps do with
+    # `Turbo::Streams::TagBuilder`. Methods can call {#action}, {#action_all}, or
+    # {#turbo_stream_action_tag}, so modules written for turbo-rails work unchanged:
+    #
+    #   module MyApp::TurboStreamActions
+    #     def toast(message, level: "info")
+    #       action(:toast, nil, message:, level:)
+    #     end
+    #   end
+    #
+    #   Hanami::Turbo::StreamBuilder.include(MyApp::TurboStreamActions)
+    #
+    # Then handle the action in JavaScript via `Turbo.StreamActions`.
+    #
     # @example In a `.turbo_stream.erb` template
     #   <%= turbo_stream.append "books", partial: "books/book", locals: {book:} %>
     #   <%= turbo_stream.replace book do %>
@@ -66,8 +80,12 @@ module Hanami
 
       # Builds a stream element for any action, including custom ones.
       #
+      # Any other keyword arguments become attributes of the `<turbo-stream>` element (except
+      # `partial:`, `locals:` and `method:`, which are used as described below). A `<template>` is
+      # included when there is content, and always for Turbo's built-in content actions.
+      #
       # @param name [Symbol, String] the stream action
-      # @param target [Object] DOM id string, or a record
+      # @param target [Object, nil] DOM id string, a record, or nil for actions without a target
       # @param content [String, nil] content for the element's `<template>`
       # @param partial [String, nil] partial to render as the content
       # @param locals [Hash] locals for the partial
@@ -75,7 +93,8 @@ module Hanami
       #
       # @api public
       def action(name, target, content = nil, **options, &block)
-        stream(name, {target: DomId.dom_id(target, inflector: inflector)}, content, **options, &block)
+        target_attributes = target.nil? ? {} : {target: DomId.dom_id(target, inflector: inflector)}
+        stream(name, target_attributes, content, **options, &block)
       end
 
       # Builds a stream element for any action, targeting all elements matching a CSS selector.
@@ -83,6 +102,27 @@ module Hanami
       # @api public
       def action_all(name, targets, content = nil, **options, &block)
         stream(name, {targets: targets}, content, **options, &block)
+      end
+
+      # Builds a stream element, with the same signature as turbo-rails' `turbo_stream_action_tag`.
+      #
+      # @example
+      #   turbo_stream_action_tag :console_log, message: "Hello"
+      #   turbo_stream_action_tag :notify, target: book, template: "<b>Saved</b>".html_safe
+      #
+      # @param name [Symbol, String] the stream action
+      # @param target [Object, nil] DOM id string or record
+      # @param targets [String, nil] CSS selector, instead of a target
+      # @param template [String, nil] content for the element's `<template>`
+      # @param attributes [Hash] other attributes for the `<turbo-stream>` element
+      #
+      # @api public
+      def turbo_stream_action_tag(name, target: nil, targets: nil, template: nil, **attributes)
+        if targets
+          action_all(name, targets, template, **attributes)
+        else
+          action(name, target, template, **attributes)
+        end
       end
 
       private
@@ -93,7 +133,9 @@ module Hanami
         content = render_partial(partial, locals) if partial
         content = block.call if block
 
-        template = scope.tag.template(content.to_s) unless name == :remove
+        if name.to_sym != :remove && (!content.nil? || CONTENT_ACTIONS.include?(name.to_sym))
+          template = scope.tag.template(content.to_s)
+        end
 
         stream_tag(template, action: name, **target_attributes, method:, **attributes)
       end

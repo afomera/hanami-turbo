@@ -6,6 +6,7 @@
   HTML when a view has no stream template.
 - A `turbo_stream` builder, `turbo_frame_tag`, and `dom_id`/`dom_class` helpers for templates.
 - `button_to`, for buttons that submit (with Turbo confirmations, like Rails).
+- Custom stream actions, added like in turbo-rails (`turbo_stream_action_tag` included).
 - `303 See Other` redirects after non-GET requests, as Turbo requires.
 - Optional lighter layouts for Turbo Frame requests.
 
@@ -99,6 +100,58 @@ end
 
 Error responses that weren't rendered from a stream template (such as `halt 404`) are sent as HTML
 even when the request negotiated a stream, so Turbo shows them instead of silently ignoring them.
+
+### Custom stream actions
+
+Add your own actions the way turbo-rails apps do: write a module and include it into
+`Hanami::Turbo::StreamBuilder`. Its methods can call `action` (or `action_all`, for CSS selector
+targets). Keyword arguments become attributes of the `<turbo-stream>` element, the target may be
+`nil`, and a `<template>` is only added when there is content:
+
+```ruby
+# config/turbo_stream_actions.rb, required from config/app.rb
+module Bookshelf
+  module TurboStreamActions
+    def toast(message, level: "info")
+      action(:toast, nil, message:, level:)
+    end
+
+    def highlight(target)
+      action(:highlight, target)
+    end
+  end
+end
+
+Hanami::Turbo::StreamBuilder.include(Bookshelf::TurboStreamActions)
+```
+
+```erb
+<%= turbo_stream.toast "Saved #{book.title}", level: "success" %>
+<%= turbo_stream.highlight book %>
+```
+
+Then handle them in JavaScript:
+
+```js
+import { StreamActions } from "@hotwired/turbo";
+
+StreamActions.toast = function () {
+  // `this` is the <turbo-stream> element
+  showToast(this.getAttribute("message"), this.getAttribute("level"));
+};
+
+StreamActions.highlight = function () {
+  this.targetElements.forEach((element) => element.classList.add("highlight"));
+};
+```
+
+Modules written for turbo-rails work unchanged, since `turbo_stream_action_tag` is also available,
+with the same signature (`turbo_stream_action_tag :name, target:, targets:, template:, **attributes`).
+It's a view helper too, for one-off actions. Content can also come from `partial:` and `locals:`, or
+a block, as with the built-in actions.
+
+Require the module from `config/app.rb` rather than putting it somewhere autoloaded: like a Rails
+initializer, it is included once at boot, so restart the server after changing it.
 
 To pick a format yourself, pass it to `render`; explicit options always win:
 
