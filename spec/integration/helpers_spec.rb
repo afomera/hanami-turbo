@@ -114,4 +114,60 @@ RSpec.describe "Turbo view helpers", :app_integration do
       expect(output).to eq "book_42 edit_book_42 new_book edit_book book row_book_42 book book_7"
     end
   end
+
+  describe "button_to and confirmations" do
+    def render_html(template)
+      write_app(layout: "<%= yield %>", app_config: <<~RUBY)
+        config.actions.sessions = :cookie, {secret: "x" * 64}
+        Hanami::Turbo.install(config)
+      RUBY
+      write_action "books/show"
+      write "app/templates/books/show.html.erb", template
+      boot_app
+
+      body_of(call_action("books/show"))
+    end
+
+    it "renders a form with a single submit button, POST by default" do
+      output = render_html(%(<%= button_to "Archive", "/books/1/archive" %>))
+
+      form_tag = output[/\A<form[^>]*>/]
+      expect(form_tag).to include %(action="/books/1/archive"), %(method="POST"), %(class="button_to")
+      expect(output).not_to include "_method"
+      expect(output).to include %(<input type="hidden" name="_csrf_token" value=")
+      expect(output).to end_with %(<button type="submit">Archive</button></form>)
+    end
+
+    it "overrides the method, and puts turbo_confirm on the button" do
+      output = render_html(%(<%= button_to "Delete", "/books/1", method: :delete, data: {turbo_confirm: "Delete Dune?"} %>))
+
+      expect(output).to include %(<input type="hidden" name="_method" value="DELETE">)
+      expect(output).to include %(<button type="submit" data-turbo-confirm="Delete Dune?">Delete</button>)
+    end
+
+    it "takes form attributes, extra params and block content" do
+      output = render_html(<<~ERB.chomp)
+        <%= button_to "/books/1", method: :delete, form: {class: "inline", data: {turbo_confirm: "Sure?"}}, params: {return_to: "/books"}, class: "danger" do %><b>Delete</b><% end %>
+      ERB
+
+      expect(output).to include %(class="inline")
+      expect(output).to include %(data-turbo-confirm="Sure?")
+      expect(output).not_to include "button_to"
+      expect(output).to include %(<input type="hidden" name="return_to" value="/books">)
+      expect(output).to end_with %(<button type="submit" class="danger"><b>Delete</b></button></form>)
+    end
+
+    it "escapes confirmation messages and content" do
+      output = render_html(%(<%= button_to "<i>x</i>", "/x", data: {turbo_confirm: %q(Delete "Dune" & more?)} %>))
+
+      expect(output).to include %(data-turbo-confirm="Delete &quot;Dune&quot; &amp; more?")
+      expect(output).to include "&lt;i&gt;x&lt;/i&gt;"
+    end
+
+    it "lets links make non-GET requests with confirmation" do
+      output = render_html(%(<%= link_to "Delete", "/books/1", data: {turbo_method: :delete, turbo_confirm: "Sure?"} %>))
+
+      expect(output).to eq %(<a data-turbo-method="delete" data-turbo-confirm="Sure?" href="/books/1">Delete</a>)
+    end
+  end
 end

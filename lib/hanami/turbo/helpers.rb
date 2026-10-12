@@ -40,6 +40,59 @@ module Hanami
         tag.turbo_frame(id:, src:, target:, loading:, **attributes, &block)
       end
 
+      # Returns a form containing a single button, for actions that shouldn't be links (anything that
+      # changes data). Like Rails' `button_to`.
+      #
+      # The form includes the CSRF token and, for methods other than GET and POST, a `_method` field.
+      # Attributes are given to the button, so `data: {turbo_confirm: "..."}` asks Turbo to confirm
+      # before submitting. Use `form:` for the form's own attributes.
+      #
+      # @example
+      #   button_to "Delete", routes.path(:book, id: book.id), method: :delete,
+      #     data: {turbo_confirm: "Delete #{book.title}?"}
+      #
+      #   button_to routes.path(:archive_book, id: book.id), form: {class: "inline"} do
+      #     "<span>Archive</span>".html_safe
+      #   end
+      #
+      # @param content [String, nil] button content (omit when giving a block)
+      # @param url [String] the form's action
+      # @param method [Symbol, String] HTTP method (default: POST)
+      # @param form [Hash] attributes for the form (default class: `"button_to"`)
+      # @param params [Hash] extra hidden fields to submit
+      # @param attributes [Hash] attributes for the button
+      #
+      # @return [String] the form
+      #
+      # @api public
+      def button_to(content = nil, url = nil, method: :post, form: {}, params: {}, **attributes, &block)
+        if block
+          raise ArgumentError, "give either content or a block, not both" if url
+
+          url = content
+          content = nil
+        end
+        raise ArgumentError, "a URL is required" unless url
+
+        form_attributes = {class: "button_to", **form}
+
+        # `values:` and `params:` are form_for's sources for field values; this form has no fields.
+        form_for(url, method:, values: {}, params: {}, **form_attributes) do |f|
+          hidden_fields = params.map { |name, value|
+            tag.input(type: "hidden", name: name.to_s, value: value.to_s)
+          }
+
+          button =
+            if block
+              f.button(type: "submit", **attributes, &block)
+            else
+              f.button(content, type: "submit", **attributes)
+            end
+
+          (hidden_fields.join + button).html_safe
+        end
+      end
+
       # @see DomId.dom_id
       #
       # @api public

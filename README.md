@@ -5,6 +5,7 @@
 - Renders `.turbo_stream` templates for Turbo Stream requests (without a layout), falling back to
   HTML when a view has no stream template.
 - A `turbo_stream` builder, `turbo_frame_tag`, and `dom_id`/`dom_class` helpers for templates.
+- `button_to`, for buttons that submit (with Turbo confirmations, like Rails).
 - `303 See Other` redirects after non-GET requests, as Turbo requires.
 - Optional lighter layouts for Turbo Frame requests.
 
@@ -123,6 +124,77 @@ Hanami::Turbo.config.frame_layout = "frame"   # or a lighter layout, e.g. one wi
 
 In actions, `req.turbo_frame` returns the requesting frame's id, and `req.turbo_frame?` and
 `req.turbo_stream?` tell you what kind of Turbo request you have.
+
+## Buttons, confirmations and non-GET links
+
+`button_to` renders a one-button form (with the CSRF token, and `_method` for PATCH, PUT and DELETE),
+like Rails. Attributes go on the button; `form:` sets the form's own attributes, and `params:` adds
+hidden fields.
+
+```erb
+<%= button_to "Delete", routes.path(:book, id: book.id),
+      method: :delete,
+      data: {turbo_confirm: "Delete #{book.title}?"} %>
+
+<%= button_to "Archive", routes.path(:archive_book, id: book.id), form: {class: "inline"}, params: {return_to: "/books"} %>
+```
+
+Turbo asks for confirmation before submitting any form, or form button, with `data-turbo-confirm`.
+You can put it on the button (as above) or the form (`form: {data: {turbo_confirm: "..."}}`), as
+Rails apps do.
+
+Links can make non-GET requests through Turbo, with or without confirmation, using `link_to`:
+
+```erb
+<%= link_to "Delete", routes.path(:book, id: book.id),
+      data: {turbo_method: :delete, turbo_confirm: "Are you sure?"} %>
+```
+
+Turbo sends these as real `DELETE` (etc.) requests, with the CSRF token from `csrf_meta_tags` in an
+`X-CSRF-Token` header. Prefer `button_to` for anything destructive: unlike links, buttons also work
+without JavaScript.
+
+### Custom confirmation dialogs
+
+By default Turbo uses the browser's `confirm()`. To show your own dialog, set
+`Turbo.config.forms.confirm` to a function returning a promise of true or false:
+
+```erb
+<%# in the layout %>
+<dialog id="confirm-dialog">
+  <form method="dialog">
+    <p id="confirm-message"></p>
+    <button value="cancel">Cancel</button>
+    <button value="confirm" data-confirm-button>Confirm</button>
+  </form>
+</dialog>
+```
+
+```js
+import * as Turbo from "@hotwired/turbo";
+
+Turbo.config.forms.confirm = (message, form, submitter) => {
+  const dialog = document.getElementById("confirm-dialog");
+  dialog.querySelector("#confirm-message").textContent = message;
+  dialog.querySelector("[data-confirm-button]").textContent =
+    submitter?.dataset.turboConfirmButton || form.dataset.turboConfirmButton || "Confirm";
+  dialog.showModal();
+
+  return new Promise((resolve) => {
+    dialog.addEventListener("close", () => resolve(dialog.returnValue === "confirm"), { once: true });
+  });
+};
+```
+
+The `data-turbo-confirm-button` attribute is a convention from this snippet (not part of Turbo)
+for customising the confirm button's label per button:
+
+```erb
+<%= button_to "Delete", path, method: :delete,
+      data: {turbo_confirm: "Delete this book?", turbo_confirm_button: "Delete book"} %>
+```
+
+(On Turbo 7, use `Turbo.setConfirmMethod(fn)` instead; Turbo 8 deprecates it.)
 
 ## DOM ids
 
