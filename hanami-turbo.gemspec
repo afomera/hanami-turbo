@@ -5,7 +5,8 @@ require_relative "lib/hanami/turbo/version"
 Gem::Specification.new do |spec|
   spec.name = "hanami-turbo"
   spec.version = Hanami::Turbo::VERSION
-  spec.authors = ["Hanami team"]
+  spec.authors = ["Andrea Fomera"]
+  spec.email = ["andrea.fomera@gmail.com"]
   spec.summary = "Hotwire Turbo support for Hanami apps"
   spec.description = "Turbo Stream rendering, Turbo Frame helpers, and Turbo-friendly redirects for Hanami"
   spec.homepage = "https://hanamirb.org"
